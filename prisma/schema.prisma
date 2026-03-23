@@ -1,0 +1,82 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  months Month[]
+  categories UserCategory[]
+}
+
+model Month {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key       String   // e.g., "2026-03"
+  label     String   // e.g., "March 2026"
+  createdAt DateTime @default(now())
+
+  banks Bank[]
+
+  @@unique([userId, key])
+}
+
+model Bank {
+  id        String   @id @default(cuid())
+  monthId   String
+  month     Month    @relation(fields: [monthId], references: [id], onDelete: Cascade)
+  name      String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  cards Card[]
+}
+
+model Card {
+  id        String   @id @default(cuid())
+  bankId    String
+  bank      Bank     @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  name      String
+  type      String?
+  note      String?
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  categories CashbackCategory[]
+}
+
+model UserCategory {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  color     String?
+  createdAt DateTime @default(now())
+
+  cashbackCategories CashbackCategory[]
+
+  @@unique([userId, name])
+}
+
+model CashbackCategory {
+  id             String       @id @default(cuid())
+  cardId         String
+  card           Card         @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  userCategoryId String
+  userCategory   UserCategory @relation(fields: [userCategoryId], references: [id], onDelete: Cascade)
+  percent    Float
+  limit      Float?
+  comment    String?
+  isPromoted Boolean  @default(false)
+  position   Int      @default(0)
+  createdAt  DateTime @default(now())
+}
