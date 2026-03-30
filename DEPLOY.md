@@ -73,7 +73,7 @@ NODE_ENV=production
 ## Шаг 4: Сборка и запуск
 
 ```bash
-# Собрать образ
+# Собрать образ (первый раз может занять несколько минут)
 docker compose build
 
 # Запустить контейнер
@@ -82,6 +82,8 @@ docker compose up -d
 # Применить миграции базы данных
 docker compose exec cashback-app npx prisma migrate deploy
 ```
+
+> ⚠️ **Важно:** Если сборка завершилась с ошибкой "Could not find Prisma Schema", убедитесь, что файл `prisma/schema.prisma` существует в директории проекта.
 
 ---
 
