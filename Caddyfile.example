@@ -1,5 +1,5 @@
 # Caddyfile для cashback.doroninva.ru
 
 cashback.doroninva.ru {
-    reverse_proxy cashback-app:3000
+    reverse_proxy cashback-app:3010
 }

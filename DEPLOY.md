@@ -1,4 +1,4 @@
-# Инструкция по деплою на VPS
+# Инструкция по деплою на VPS (без Docker)
 
 ## Требования
 
@@ -6,11 +6,25 @@
 - Web-сервер: **Caddy** (на хосте)
 - БД: **PostgreSQL** (на хосте)
 - Путь приложения: `/srv/apps/cashback`
-- Node.js: **не требуется** (приложение в Docker)
+- Node.js: **требуется** (устанавливается на хост)
 
 ---
 
-## Шаг 1: Подготовка базы данных
+## Шаг 1: Установка Node.js 20
+
+```bash
+# Для Ubuntu/Debian
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Проверка версий
+node --version  # Должно быть v20.x.x
+npm --version   # Должно быть 10.x.x
+```
+
+---
+
+## Шаг 2: Подготовка базы данных
 
 Подключитесь к PostgreSQL и создайте БД и пользователя:
 
@@ -25,17 +39,7 @@ GRANT ALL PRIVILEGES ON DATABASE cashback_db TO cashback_user;
 \q
 ```
 
-> ⚠️ Замените пароль на более надёжный!
-
----
-
-## Шаг 2: Создание сети для Caddy
-
-Если сеть `caddy` ещё не создана:
-
-```bash
-docker network inspect caddy >/dev/null 2>&1 || docker network create caddy
-```
+> ⚠️ **Важно:** Замените пароль `cashback_pass` на более надёжный!
 
 ---
 
@@ -45,13 +49,9 @@ docker network inspect caddy >/dev/null 2>&1 || docker network create caddy
 # Перейти в директорию приложения
 cd /srv/apps/cashback
 
-# Сгенерировать секретный ключ для NextAuth
-openssl rand -base64 32
-```
+# Установить зависимости
+npm install
 
-Скопируйте вывод команды выше — это ваш `AUTH_SECRET`.
-
-```bash
 # Создать файл .env из шаблона
 cp .env.example .env
 
@@ -62,83 +62,95 @@ nano .env
 Заполните `.env`:
 
 ```env
-AUTH_SECRET=<ваш-ключ-из-openssl>
-DATABASE_URL=postgresql://cashback_user:cashback_pass@host.docker.internal:5432/cashback_db
+# NextAuth JWT Secret (сгенерируйте: openssl rand -base64 32)
+AUTH_SECRET=<ваш-секретный-ключ>
+
+# Подключение к базе данных
+DATABASE_URL=postgresql://cashback_user:cashback_pass@localhost:5432/cashback_db
+
+# URL приложения
 NEXTAUTH_URL=https://cashback.doroninva.ru
-NODE_ENV=production
+
+# Порт приложения
+PORT=3010
+
+# Переменные для создания первого пользователя (опционально)
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=change-me-in-production
 ```
 
 ---
 
-## Шаг 4: Сборка и запуск
+## Шаг 4: Применение миграций базы данных
 
 ```bash
-# Собрать образ (первый раз может занять несколько минут)
-docker compose build
-
-# Запустить контейнер
-docker compose up -d
-```
-
----
-
-## Шаг 4.1: Применить миграции базы данных
-
-Миграции применяются **на хосте** (не в контейнере), так как база данных работает на хосте:
-
-```bash
-# Установить зависимости локально (если ещё не установлены)
-npm install
-
 # Применить миграции
 npx prisma migrate deploy
 ```
 
-> ⚠️ **Важно:** Для выполнения миграций требуется Node.js на хосте. Если Node.js не установлен, можно использовать временный контейнер:
->
+> ℹ️ Если миграции ещё не созданы, используйте:
 > ```bash
-> # Запустить миграции через временный контейнер
-> docker run --rm --network host \
->   -e DATABASE_URL=postgresql://cashback_user:cashback_pass@host.docker.internal:5432/cashback_db \
->   -v $(pwd):/app \
->   node:20-alpine sh -c "cd /app && npm ci && npx prisma migrate deploy"
+> npx prisma migrate dev --name init
 > ```
 
 ---
 
-## Шаг 4.2: Создание первого пользователя
+## Шаг 5: Создание первого пользователя
 
-После первого запуска база данных пуста. Создайте первого пользователя:
+После применения миграций база данных пуста. Создайте первого пользователя:
 
 ```bash
 # Создать пользователя с паролем
-docker compose exec cashback-app node scripts/create-user.js <email> <password>
+node scripts/create-user.js <email> <password>
 ```
 
 **Пример:**
 ```bash
-docker compose exec cashback-app node scripts/create-user.js admin@example.com MySecurePassword123
+node scripts/create-user.js admin@example.com MySecurePassword123
 ```
 
 > ℹ️ Скрипт проверит, что пользователь ещё не существует, и хеширует пароль перед сохранением.
 
-**Альтернатива через переменные окружения:**
+---
+
+## Шаг 6: Сборка приложения
+
 ```bash
-# Если хотите использовать значения из .env
-docker compose exec cashback-app sh -c "node scripts/create-user.js \$ADMIN_EMAIL \$ADMIN_PASSWORD"
+# Собрать production-версию
+npm run build
 ```
+
+После успешной сборки будет создана папка `.next`.
 
 ---
 
-## Шаг 5: Настройка Caddy
+## Шаг 7: Запуск приложения через PM2
 
-### Вариант A: Caddy установлен на хосте
+```bash
+# Установить PM2 глобально
+sudo npm install -g pm2
+
+# Запустить приложение
+pm2 start npm --name "cashback-app" -- start
+
+# Сохранить конфигурацию для автозапуска
+pm2 save
+
+# Настроить автозапуск при загрузке системы
+pm2 startup
+```
+
+Последняя команда выведет инструкцию — выполните её (обычно это `sudo env PATH=$PATH:/usr/bin pm2 startup ...`).
+
+---
+
+## Шаг 8: Настройка Caddy
 
 Отредактируйте `/etc/caddy/Caddyfile`:
 
 ```caddy
 cashback.doroninva.ru {
-    reverse_proxy cashback-app:3000
+    reverse_proxy localhost:3010
 }
 ```
 
@@ -148,40 +160,15 @@ cashback.doroninva.ru {
 sudo systemctl reload caddy
 ```
 
-### Вариант B: Caddy в Docker
-
-Скопируйте `Caddyfile.example` в конфигурационную директорию Caddy:
-
-```bash
-cp Caddyfile.example /path/to/caddy/Caddyfile
-```
-
-Перезагрузите Caddy:
-
-```bash
-docker exec caddy caddy reload --config /etc/caddy/Caddyfile
-```
-
 ---
 
-## Шаг 6: Проверка
+## Шаг 9: Проверка
 
-### Проверить статус контейнера
-
-```bash
-docker compose ps
-```
-
-### Посмотреть логи приложения
+### Проверить статус приложения
 
 ```bash
-docker compose logs -f cashback-app
-```
-
-### Проверить доступность
-
-```bash
-curl -I http://localhost:3000
+pm2 status
+pm2 logs cashback-app
 ```
 
 ### Открыть в браузере
@@ -190,28 +177,32 @@ curl -I http://localhost:3000
 
 Caddy автоматически получит HTTPS-сертификат от Let's Encrypt.
 
+### Войти в приложение
+
+Используйте email и пароль, созданные в Шаге 5.
+
 ---
 
 ## Управление приложением
 
 ```bash
-# Остановить
-docker compose down
-
-# Перезапустить
-docker compose restart
-
-# Пересобрать и перезапустить
-docker compose build && docker compose up -d
+# Посмотреть статус
+pm2 status
 
 # Посмотреть логи
-docker compose logs -f
+pm2 logs cashback-app
 
-# Выполнить команду в контейнере
-docker compose exec cashback-app sh
+# Перезапустить
+pm2 restart cashback-app
 
-# Применить миграции
-docker compose exec cashback-app npx prisma migrate deploy
+# Остановить
+pm2 stop cashback-app
+
+# Запустить
+pm2 start cashback-app
+
+# Удалить из списка PM2
+pm2 delete cashback-app
 ```
 
 ---
@@ -224,75 +215,109 @@ cd /srv/apps/cashback
 # Обновить код из git
 git pull
 
-# Пересобрать и перезапустить
-docker compose build
-docker compose up -d
+# Установить новые зависимости (если изменился package.json)
+npm install
 
-# Применить миграции (если есть)
-docker compose exec cashback-app npx prisma migrate deploy
+# Применить миграции (если есть новые)
+npx prisma migrate deploy
+
+# Пересобрать
+npm run build
+
+# Перезапустить приложение
+pm2 restart cashback-app
 ```
 
 ---
 
 ## Безопасность
 
-1. **Замените пароли по умолчанию** в `.env`:
-   - `cashback_pass` → надёжный пароль
-   - `AUTH_SECRET` → сгенерированный ключ
+### 1. Настройте firewall
 
-2. **Настройте firewall**:
-   ```bash
-   sudo ufw allow 80/tcp
-   sudo ufw allow 443/tcp
-   sudo ufw enable
-   ```
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable
+sudo ufw status
+```
 
-3. **Настройте автоматические обновления**:
-   ```bash
-   sudo apt install unattended-upgrades
-   ```
+### 2. Используйте надёжные пароли
+
+- Замените `cashback_pass` в БД на сложный пароль
+- Сгенерируйте новый `AUTH_SECRET`: `openssl rand -base64 32`
+- Используйте сложный пароль для первого пользователя
+
+### 3. Настройте автоматические обновления
+
+```bash
+sudo apt install unattended-upgrades
+sudo dpkg-reconfigure --priority=low unattended-upgrades
+```
+
+### 4. Ограничьте доступ к PostgreSQL
+
+Убедитесь, что PostgreSQL слушает только localhost:
+
+```bash
+sudo nano /etc/postgresql/*/main/postgresql.conf
+# listen_addresses = 'localhost'
+sudo systemctl restart postgresql
+```
 
 ---
 
 ## Troubleshooting
 
-### Ошибка подключения к БД
+### Приложение не запускается
 
-Проверьте, что PostgreSQL слушает нужные интерфейсы:
+Проверьте логи PM2:
 
 ```bash
-sudo nano /etc/postgresql/*/main/postgresql.conf
-# listen_addresses = '*'
-sudo systemctl restart postgresql
+pm2 logs cashback-app --lines 100
 ```
 
-Проверьте `pg_hba.conf`:
+Проверьте переменные окружения:
 
 ```bash
-sudo nano /etc/postgresql/*/main/pg_hba.conf
-# host all all 172.17.0.0/16 md5
-sudo systemctl restart postgresql
+cat .env
+```
+
+### Ошибка подключения к базе данных
+
+Проверьте подключение:
+
+```bash
+psql -U cashback_user -d cashback_db -h localhost
+```
+
+Убедитесь, что PostgreSQL запущен:
+
+```bash
+sudo systemctl status postgresql
 ```
 
 ### Caddy не получает сертификат
 
 Проверьте DNS:
+
 ```bash
 dig cashback.doroninva.ru
 ```
 
 Убедитесь, что домен указывает на IP вашего сервера.
 
-### Приложение не запускается
+Проверьте логи Caddy:
 
-Проверьте логи:
 ```bash
-docker compose logs cashback-app
+sudo journalctl -u caddy --no-pager | tail -50
 ```
 
-Проверьте переменные окружения:
+### Ошибка Prisma
+
+Попробуйте перегенерировать клиент:
+
 ```bash
-docker compose exec cashback-app env
+npx prisma generate
 ```
 
 ---
@@ -300,18 +325,23 @@ docker compose exec cashback-app env
 ## Мониторинг
 
 ```bash
-# Статус контейнеров
-docker compose ps
-
-# Использование ресурсов
-docker stats cashback-app
+# Статус приложения
+pm2 status
 
 # Логи в реальном времени
-docker compose logs -f cashback-app
+pm2 logs cashback-app
+
+# Использование ресурсов
+pm2 monit
 
 # Место на диске
 df -h
-docker system df
+
+# Статус PostgreSQL
+sudo systemctl status postgresql
+
+# Статус Caddy
+sudo systemctl status caddy
 ```
 
 ---
@@ -321,17 +351,55 @@ docker system df
 ### Бэкап базы данных
 
 ```bash
-docker exec $(docker ps -q -f name=postgres) pg_dump -U cashback_user cashback_db > backup_$(date +%Y%m%d).sql
+# Создать бэкап
+pg_dump -U cashback_user cashback_db > backup_$(date +%Y%m%d_%H%M%S).sql
+
+# Сжать
+gzip backup_*.sql
 ```
 
 ### Бэкап данных приложения
 
 ```bash
-tar -czf cashback-backup-$(date +%Y%m%d).tar.gz /srv/apps/cashback
+tar -czf cashback-backup-$(date +%Y%m%d).tar.gz \
+  /srv/apps/cashback/.env \
+  /srv/apps/cashback/prisma/schema.prisma
 ```
 
 ### Восстановление из бэкапа
 
 ```bash
+# Распаковать SQL
+gunzip backup_20260101.sql.gz
+
+# Восстановить БД
 psql -U cashback_user -d cashback_db < backup_20260101.sql
+```
+
+### Автоматический бэкап (cron)
+
+```bash
+# Редактировать crontab
+crontab -e
+
+# Добавить ежедневный бэкап в 3:00
+0 3 * * * pg_dump -U cashback_user cashback_db | gzip > /backups/cashback_$(date +\%Y\%m\%d).sql.gz
+```
+
+---
+
+## Полезные команды
+
+```bash
+# Пересоздать пользователя
+node scripts/create-user.js newuser@example.com NewPassword123
+
+# Проверка подключения к БД
+node scripts/db-check.js
+
+# Очистить кэш npm
+npm cache clean --force
+
+# Пересобрать без кэша
+rm -rf .next && npm run build
 ```
