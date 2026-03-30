@@ -78,16 +78,35 @@ docker compose build
 
 # Запустить контейнер
 docker compose up -d
-
-# Применить миграции базы данных
-docker compose exec cashback-app npx prisma migrate deploy
 ```
-
-> ⚠️ **Важно:** Если сборка завершилась с ошибкой "Could not find Prisma Schema", убедитесь, что файл `prisma/schema.prisma` существует в директории проекта.
 
 ---
 
-## Шаг 4.1: Создание первого пользователя
+## Шаг 4.1: Применить миграции базы данных
+
+Миграции применяются **на хосте** (не в контейнере), так как база данных работает на хосте:
+
+```bash
+# Установить зависимости локально (если ещё не установлены)
+npm install
+
+# Применить миграции
+npx prisma migrate deploy
+```
+
+> ⚠️ **Важно:** Для выполнения миграций требуется Node.js на хосте. Если Node.js не установлен, можно использовать временный контейнер:
+>
+> ```bash
+> # Запустить миграции через временный контейнер
+> docker run --rm --network host \
+>   -e DATABASE_URL=postgresql://cashback_user:cashback_pass@host.docker.internal:5432/cashback_db \
+>   -v $(pwd):/app \
+>   node:20-alpine sh -c "cd /app && npm ci && npx prisma migrate deploy"
+> ```
+
+---
+
+## Шаг 4.2: Создание первого пользователя
 
 После первого запуска база данных пуста. Создайте первого пользователя:
 
